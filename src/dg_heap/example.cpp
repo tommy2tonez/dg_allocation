@@ -199,7 +199,7 @@ int main(){
 
     using namespace std::chrono;
 
-    constexpr size_t HEIGHT         = 12;
+    constexpr size_t HEIGHT         = 28;
     constexpr size_t BASE_LENGTH    = size_t{1} << (HEIGHT - 1);
 
     // std::vector<bool> bc{};
@@ -212,12 +212,12 @@ int main(){
 
     // std::cout << l;
     std::shared_ptr<dg::heap::core::Allocatable> allocator  = dg::heap::user_interface::get_allocator_x(buf.get());
-    auto random_device  = std::bind(std::uniform_int_distribution<size_t>{}, std::mt19937{});
+    auto random_device  = std::bind(std::uniform_int_distribution<size_t>{16, 64}, std::mt19937{});
     std::vector<interval_type> intvs{};
 
     while (true){
 
-        size_t block_sz = (random_device() % BASE_LENGTH) + 1;
+        size_t block_sz = random_device();
         std::optional<interval_type> intv = allocator->alloc(block_sz);
         
         if (!bool{intv} && b_allocator.has_block(block_sz)){

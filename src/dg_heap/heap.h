@@ -20,6 +20,7 @@
 #include <cstring>
 #include "serialization.h"
 #include <iostream>
+#include "sort.h"
 
 #ifdef __cpp_consteval
 #define _DG_CONSTEVAL consteval
@@ -31,8 +32,8 @@
 
 namespace dg::heap::limits{
 
-    static inline const auto MIN_HEAP_HEIGHT         = uint8_t{12};
-    static inline const auto MAX_HEAP_HEIGHT         = uint8_t{12};
+    static inline const auto MIN_HEAP_HEIGHT         = uint8_t{28};
+    static inline const auto MAX_HEAP_HEIGHT         = uint8_t{28};
     static inline const auto EXCL_MAX_HEAP_HEIGHT    = uint8_t{MAX_HEAP_HEIGHT + 1};
 }
 
@@ -45,6 +46,7 @@ namespace dg::heap::types{
 
     using traceback_type    = size_t;
     using store_type        = uint32_t;
+    using double_store_type = uint64_t;
     using interval_type     = std::pair<store_type, store_type>;
 
     struct Node{
@@ -115,7 +117,7 @@ namespace dg::heap::data{ //model
             static inline const size_t HEIGHT               = T::HEIGHT;
 
             static auto& get_boolvector_container() noexcept{
-            /home/tommy2tonez/dg_projects/dg_torch/src/dg_allocation.h
+
                 return T::get_boolvector_container();
             }
 
@@ -832,6 +834,7 @@ namespace dg::heap::utility{
 
         using store_type        = types::store_type;
         using interval_type     = types::interval_type;
+        using num_rep_type      = types::double_store_type;
         using op_interval_type  = std::optional<interval_type>;
         
         using _TypeUtility      = TypeUtility;
@@ -862,6 +865,16 @@ namespace dg::heap::utility{
         static constexpr auto get_interval_end(const interval_type& data) -> store_type{
 
             return data.second;
+        }
+
+        static constexpr auto interval_to_numerical_rep(const interval_type& data) -> num_rep_type{
+
+            return (static_cast<num_rep_type>(get_interval_beg(data)) << (sizeof(store_type) * CHAR_BIT)) | static_cast<num_rep_type>(get_interval_end(data));
+        }
+
+        static constexpr auto numerical_rep_to_interval(num_rep_type data) -> interval_type{
+
+            return make(data >> (sizeof(store_type) * CHAR_BIT), data & static_cast<num_rep_type>(std::numeric_limits<store_type>::max())); 
         }
 
         static constexpr auto get_interval_excl_end(const interval_type& data) -> store_type{
@@ -2399,17 +2412,47 @@ namespace dg::heap::batch_interval_ops{
         using _LambdaUlt        = utility::LambdaUtility;
         using _IterUlt          = utility::IteratorUtility;
 
+        // static auto noexcept_inplace_sort(Iterator first, Iterator last) 
+
         template <class _Iterator> 
-        static constexpr auto inplace_sort(_Iterator first, _Iterator last) -> std::pair<_Iterator, _Iterator>{
+        static constexpr auto noexcept_inplace_sort(_Iterator first, _Iterator last) noexcept -> std::pair<_Iterator, _Iterator>{
 
             auto cmp_lambda = [](const interval_type& lhs, const interval_type& rhs){
                 return _IntervalUtility::get_interval_beg(lhs) < _IntervalUtility::get_interval_beg(rhs);
             };
             
             std::sort(first, last, cmp_lambda);
+            return {first, last};
+        }
+
+        template <class _Iterator> 
+        static auto fast_inplace_sort(_Iterator first, _Iterator last) -> std::pair<_Iterator, _Iterator>{
+            
+            using interval_num_rep_t = decltype(_IntervalUtility::interval_to_numerical_rep(*first));
+
+            auto tmp = std::make_unique<interval_num_rep_t[]>(std::distance(first, last));
+            std::transform(first, last, tmp.get(), []<class ...Args>(Args&& ...args){return _IntervalUtility::interval_to_numerical_rep(std::forward<Args>(args)...);});
+            dg::uniform_radix_sort::radix_sort_w_auto_max_bound(tmp.get(), tmp.get() + std::distance(first, last));
+            std::transform(tmp.get(), tmp.get() + std::distance(first, last), first, []<class ...Args>(Args&& ...args){return _IntervalUtility::numerical_rep_to_interval(std::forward<Args>(args)...);});
 
             return {first, last};
         }
+
+        template <class _Iterator>
+        static auto inplace_sort(_Iterator first, _Iterator last) noexcept -> std::pair<_Iterator, _Iterator>{
+            
+            constexpr size_t FAST_PATH_THRSHLD = size_t{1} << 16;  
+
+            try{
+                if (std::distance(first, last) >= FAST_PATH_THRSHLD){
+                    return fast_inplace_sort(first, last);
+                } else{
+                    return noexcept_inplace_sort(first, last);
+                }
+            } catch (std::exception&){
+                return noexcept_inplace_sort(first, last);
+            }
+        } 
 
         template <class _Iterator>
         static constexpr auto inplace_shrink(_Iterator first, _Iterator last) -> std::pair<_Iterator, _Iterator>{
@@ -2421,7 +2464,6 @@ namespace dg::heap::batch_interval_ops{
             element_type rs;
             
             while (i != last){
-
                 std::tie(rs, i)     = _NumericUtility::accumulate_until(_IntervalLambda::uunion, i, last, _LambdaUlt::negate(_IntervalLambda::is_consecutive));
                 _IterUlt::meat(ptr) = rs;
                 ptr                 = std::next(ptr);
@@ -4514,7 +4556,7 @@ namespace dg::heap::internal_core{
                     return;
                 }
 
-                this->sync_sellable();/home/tommy2tonez/dg_projects/dg_torch/src/dg_allocation.h
+                this->sync_sellable();
                 this->spawn_sellable();
 
                 if (!this->raw_free(intv)){
@@ -5099,7 +5141,7 @@ namespace dg::heap::resource{
         static auto spawn_fast_allocator(const data::StorageExtractible<T> view,
                                          const internal_core::HeapOperatable<T1> controller){
             
-            constexpr auto BUY_LIM  = size_t{1} << 15; //
+            constexpr auto BUY_LIM  = size_t{1} << 19;
             constexpr auto HEIGHT   = data::StorageExtractible<T>::TREE_HEIGHT; 
 
             auto max_gen            = seeker::SeekerLambdanizer::get_root_leftright_seeker(seeker::SeekerSpawner::get_max_interval_seeker(view));

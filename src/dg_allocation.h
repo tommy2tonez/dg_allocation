@@ -10,7 +10,7 @@ namespace dg::allocation{
 
     using header_type                               = uint32_t;
     static inline constexpr size_t ALLOCATOR_COUNT  = 4;
-    static inline constexpr size_t BINARY_HEIGHT    = 27;
+    static inline constexpr size_t BINARY_HEIGHT    = 28;
     static inline constexpr size_t LEAF_SZ          = sizeof(std::max_align_t) * 2;
 
     template <class WorkOrder>
