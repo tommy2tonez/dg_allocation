@@ -20,7 +20,6 @@
 #include <cstring>
 #include "serialization.h"
 #include <iostream>
-#include "sort.h"
 
 #ifdef __cpp_consteval
 #define _DG_CONSTEVAL consteval
@@ -2412,10 +2411,8 @@ namespace dg::heap::batch_interval_ops{
         using _LambdaUlt        = utility::LambdaUtility;
         using _IterUlt          = utility::IteratorUtility;
 
-        // static auto noexcept_inplace_sort(Iterator first, Iterator last) 
-
         template <class _Iterator> 
-        static constexpr auto noexcept_inplace_sort(_Iterator first, _Iterator last) noexcept -> std::pair<_Iterator, _Iterator>{
+        static constexpr auto inplace_sort(_Iterator first, _Iterator last) noexcept -> std::pair<_Iterator, _Iterator>{
 
             auto cmp_lambda = [](const interval_type& lhs, const interval_type& rhs){
                 return _IntervalUtility::get_interval_beg(lhs) < _IntervalUtility::get_interval_beg(rhs);
@@ -2424,35 +2421,6 @@ namespace dg::heap::batch_interval_ops{
             std::sort(first, last, cmp_lambda);
             return {first, last};
         }
-
-        template <class _Iterator> 
-        static auto fast_inplace_sort(_Iterator first, _Iterator last) -> std::pair<_Iterator, _Iterator>{
-            
-            using interval_num_rep_t = decltype(_IntervalUtility::interval_to_numerical_rep(*first));
-
-            auto tmp = std::make_unique<interval_num_rep_t[]>(std::distance(first, last));
-            std::transform(first, last, tmp.get(), []<class ...Args>(Args&& ...args){return _IntervalUtility::interval_to_numerical_rep(std::forward<Args>(args)...);});
-            dg::uniform_radix_sort::radix_sort_w_auto_max_bound(tmp.get(), tmp.get() + std::distance(first, last));
-            std::transform(tmp.get(), tmp.get() + std::distance(first, last), first, []<class ...Args>(Args&& ...args){return _IntervalUtility::numerical_rep_to_interval(std::forward<Args>(args)...);});
-
-            return {first, last};
-        }
-
-        template <class _Iterator>
-        static auto inplace_sort(_Iterator first, _Iterator last) noexcept -> std::pair<_Iterator, _Iterator>{
-            
-            constexpr size_t FAST_PATH_THRSHLD = size_t{1} << 16;  
-
-            try{
-                if (std::distance(first, last) >= FAST_PATH_THRSHLD){
-                    return fast_inplace_sort(first, last);
-                } else{
-                    return noexcept_inplace_sort(first, last);
-                }
-            } catch (std::exception&){
-                return noexcept_inplace_sort(first, last);
-            }
-        } 
 
         template <class _Iterator>
         static constexpr auto inplace_shrink(_Iterator first, _Iterator last) -> std::pair<_Iterator, _Iterator>{
@@ -3494,7 +3462,7 @@ namespace dg::heap::market{
         using _IRS                  = IRS;
         using _AgencyCenter         = AgencyCenter;
         
-        static constexpr size_t DEFAULT_BUYING_LIMIT = size_t{1} << 20;
+        static constexpr size_t DEFAULT_BUYING_LIMIT = size_t{1} << 15;
 
         template <class T>
         static inline auto get_sale_broker(const internal_core::HeapOperatable<T> ops, interval_type valid_interval){
@@ -5141,7 +5109,7 @@ namespace dg::heap::resource{
         static auto spawn_fast_allocator(const data::StorageExtractible<T> view,
                                          const internal_core::HeapOperatable<T1> controller){
             
-            constexpr auto BUY_LIM  = size_t{1} << 19;
+            constexpr auto BUY_LIM  = size_t{1} << 15; //optimal_buy_lim = f(node_lifetime, sort_technique, heap_sz) -  most viable option: jan_was vqsort (inplace sort - locality + simd to reduce compute bound)
             constexpr auto HEIGHT   = data::StorageExtractible<T>::TREE_HEIGHT; 
 
             auto max_gen            = seeker::SeekerLambdanizer::get_root_leftright_seeker(seeker::SeekerSpawner::get_max_interval_seeker(view));
