@@ -31,8 +31,8 @@
 
 namespace dg::heap::limits{
 
-    static inline const auto MIN_HEAP_HEIGHT         = uint8_t{28};
-    static inline const auto MAX_HEAP_HEIGHT         = uint8_t{28};
+    static inline const auto MIN_HEAP_HEIGHT         = uint8_t{19};
+    static inline const auto MAX_HEAP_HEIGHT         = uint8_t{19};
     static inline const auto EXCL_MAX_HEAP_HEIGHT    = uint8_t{MAX_HEAP_HEIGHT + 1};
 }
 
@@ -45,7 +45,6 @@ namespace dg::heap::types{
 
     using traceback_type    = size_t;
     using store_type        = uint32_t;
-    using double_store_type = uint64_t;
     using interval_type     = std::pair<store_type, store_type>;
 
     struct Node{
@@ -116,7 +115,7 @@ namespace dg::heap::data{ //model
             static inline const size_t HEIGHT               = T::HEIGHT;
 
             static auto& get_boolvector_container() noexcept{
-
+            
                 return T::get_boolvector_container();
             }
 
@@ -833,7 +832,6 @@ namespace dg::heap::utility{
 
         using store_type        = types::store_type;
         using interval_type     = types::interval_type;
-        using num_rep_type      = types::double_store_type;
         using op_interval_type  = std::optional<interval_type>;
         
         using _TypeUtility      = TypeUtility;
@@ -864,16 +862,6 @@ namespace dg::heap::utility{
         static constexpr auto get_interval_end(const interval_type& data) -> store_type{
 
             return data.second;
-        }
-
-        static constexpr auto interval_to_numerical_rep(const interval_type& data) -> num_rep_type{
-
-            return (static_cast<num_rep_type>(get_interval_beg(data)) << (sizeof(store_type) * CHAR_BIT)) | static_cast<num_rep_type>(get_interval_end(data));
-        }
-
-        static constexpr auto numerical_rep_to_interval(num_rep_type data) -> interval_type{
-
-            return make(data >> (sizeof(store_type) * CHAR_BIT), data & static_cast<num_rep_type>(std::numeric_limits<store_type>::max())); 
         }
 
         static constexpr auto get_interval_excl_end(const interval_type& data) -> store_type{
@@ -2412,13 +2400,14 @@ namespace dg::heap::batch_interval_ops{
         using _IterUlt          = utility::IteratorUtility;
 
         template <class _Iterator> 
-        static constexpr auto inplace_sort(_Iterator first, _Iterator last) noexcept -> std::pair<_Iterator, _Iterator>{
+        static constexpr auto inplace_sort(_Iterator first, _Iterator last) -> std::pair<_Iterator, _Iterator>{
 
             auto cmp_lambda = [](const interval_type& lhs, const interval_type& rhs){
                 return _IntervalUtility::get_interval_beg(lhs) < _IntervalUtility::get_interval_beg(rhs);
             };
             
             std::sort(first, last, cmp_lambda);
+
             return {first, last};
         }
 
@@ -2432,6 +2421,7 @@ namespace dg::heap::batch_interval_ops{
             element_type rs;
             
             while (i != last){
+
                 std::tie(rs, i)     = _NumericUtility::accumulate_until(_IntervalLambda::uunion, i, last, _LambdaUlt::negate(_IntervalLambda::is_consecutive));
                 _IterUlt::meat(ptr) = rs;
                 ptr                 = std::next(ptr);
@@ -3462,7 +3452,7 @@ namespace dg::heap::market{
         using _IRS                  = IRS;
         using _AgencyCenter         = AgencyCenter;
         
-        static constexpr size_t DEFAULT_BUYING_LIMIT = size_t{1} << 15;
+        static constexpr size_t DEFAULT_BUYING_LIMIT = size_t{1} << 20;
 
         template <class T>
         static inline auto get_sale_broker(const internal_core::HeapOperatable<T> ops, interval_type valid_interval){
@@ -4611,7 +4601,7 @@ namespace dg::heap::internal_core{
             }
 
             void free(const interval_type& interval) noexcept{
-
+                
                 try{
                     this->fast_allocator->free(interval);
                 } catch(std::exception& e){
@@ -5109,7 +5099,7 @@ namespace dg::heap::resource{
         static auto spawn_fast_allocator(const data::StorageExtractible<T> view,
                                          const internal_core::HeapOperatable<T1> controller){
             
-            constexpr auto BUY_LIM  = size_t{1} << 15; //optimal_buy_lim = f(node_lifetime, sort_technique, heap_sz) -  most viable option: jan_was vqsort (inplace sort - locality + simd to reduce compute bound)
+            constexpr auto BUY_LIM  = size_t{1} << 15; //
             constexpr auto HEIGHT   = data::StorageExtractible<T>::TREE_HEIGHT; 
 
             auto max_gen            = seeker::SeekerLambdanizer::get_root_leftright_seeker(seeker::SeekerSpawner::get_max_interval_seeker(view));
@@ -5403,7 +5393,20 @@ namespace dg::heap::resource{
 
             return rs;
         }
+  
+        template <class ID>
+        static auto get_devirtualized_allocatable(char * buf, const ID id){
 
+            constexpr auto TREE_HEIGHT  = limits::MIN_HEAP_HEIGHT;
+            constexpr auto D_HEIGHT     = HeapResourceBase::TREE_SPECS.get_dynamic_height(TREE_HEIGHT);
+            constexpr auto TB_HEIGHT    = HeapResourceBase::TREE_SPECS.get_traceback_height(TREE_HEIGHT); 
+            using _HeapMaker            = std::remove_pointer_t<decltype(HeapResourceBase::get_heap_maker(std::integral_constant<size_t, TREE_HEIGHT>{}))>;
+            auto model                  = MVCSpawner::spawn_model(_HeapMaker::get(HeapResourceBase::fwd(buf)), std::integral_constant<size_t, D_HEIGHT>{}, std::integral_constant<size_t, TB_HEIGHT>{}, id);
+            auto view                   = MVCSpawner::spawn_view(model);
+            auto controller             = MVCSpawner::spawn_controller(model, view);   
+
+            return _Spawner::spawn_std_allocator(_Spawner::spawn_direct_allocator(view, controller), _Spawner::spawn_fast_allocator(view, controller));
+        }
     };
 
     template <class _Controller>
@@ -5533,6 +5536,12 @@ namespace dg::heap::user_interface{
     extern auto get_allocator_x(char * data, const ID& id = std::integral_constant<size_t, 0>{}) -> std::unique_ptr<core::Allocatable_X>{
 
         return _Controller::get_allocatable_x(data, id);
+    }
+
+    template <class ID = std::integral_constant<size_t, 0>>
+    extern auto get_devirtualized_fast_allocator(char * data, const ID& id = std::integral_constant<size_t, 0>{}){
+
+        return _Controller::get_devirtualized_allocatable(data, id);
     }
 
 };
