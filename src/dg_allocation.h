@@ -224,7 +224,7 @@ namespace dg::allocation{
 
             inline auto get_cur_thr_id() const noexcept -> size_t{
 
-                return static_cast<thr_id_type>(this->id_to_idx_map.find(std::this_thread::get_id())->second); //
+                return static_cast<size_t>(this->id_to_idx_map.find(std::this_thread::get_id())->second); //
             } 
 
             inline auto encode_ptr(auto hi, auto lo) const noexcept -> ptr_type{

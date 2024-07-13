@@ -1081,7 +1081,7 @@ namespace dg::pointer{
     template <class T>
     class dg_shared_ptr: private dg_shared_ptr_base<T>{
 
-        public:
+        private:
 
             using self          = dg_shared_ptr;
             using base          = dg_shared_ptr_base<T>; 
