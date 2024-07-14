@@ -47,6 +47,12 @@ namespace dg::pointer{
     template <class To, class Fr>
     struct is_reinterpret_ptr_castable<To, Fr, std::void_t<decltype(reinterpret_cast<To *>(std::declval<Fr *>()))>>: std::true_type{};
 
+    template <class T, class = void>
+    struct is_dereferencable: std::false_type{};
+
+    template <class T>
+    struct is_dereferencable<T, std::void_t<decltype(*std::declval<T&>())>>: std::true_type{};
+
     template <class T>
     struct is_bound_array: std::false_type{};
 
@@ -87,10 +93,7 @@ namespace dg::pointer{
     static inline constexpr bool is_bound_array_v                   = is_bound_array<T>::value;
 
     template <class T>
-    static inline constexpr bool is_const_ref_of_base_t_v           = std::is_same_v<const base_t<T>&, T>;
-
-    template <class T>
-    static inline constexpr bool is_r_ref_of_base_t_v               = std::is_same_v<base_t<T>&&, T>;
+    static inline constexpr bool is_dereferencable_v                = is_dereferencable<T>::value;
 
     template <class = void>
     static inline constexpr bool FALSE_VAL                          = false; 
@@ -134,10 +137,10 @@ namespace dg::pointer{
                 return this->ptr;
             }
             
-            constexpr auto operator *() const noexcept -> T&{
+            template <class _T = T *, std::enable_if_t<std::is_same_v<_T, T *> && is_dereferencable_v<_T>, bool> = true>
+            constexpr auto operator *() const noexcept{
                 
-                assert(static_cast<bool>(this->ptr)); //disable constexpr
-                return *this->ptr;
+                return *this->operator->();
             } 
 
             constexpr operator bool() const noexcept{
@@ -423,7 +426,6 @@ namespace dg::pointer{
             return;
         }
 
-        // std::cout << "invoked" << std::endl;
         std::destroy_at(ptr.get());
         dg::allocation::free(ptr.heap_addr());
     }
@@ -491,8 +493,8 @@ namespace dg::pointer{
                                                                                                                                                        deleter(std::forward<DeleterArg>(deleter)){}
                        
             template <class U, std::enable_if_t<is_strict_ptr_constructible_fr_v<T, U>, bool> = true>
-            dg_unique_ptr(dg_unique_ptr<U, DeleterType>&& other) noexcept(std::is_nothrow_move_constructible_v<DeleterType>): ptr_base(dg_static_raw_pointer_cast<T>(other.raw())),
-                                                                                                                              deleter(std::move(other).get_deleter()){
+            explicit dg_unique_ptr(dg_unique_ptr<U, DeleterType>&& other) noexcept(std::is_nothrow_move_constructible_v<DeleterType>): ptr_base(dg_static_raw_pointer_cast<T>(other.raw())),
+                                                                                                                                       deleter(std::move(other).get_deleter()){
                 other.release();
             }
 
@@ -599,7 +601,7 @@ namespace dg::pointer{
             constexpr explicit dg_unique_ptr(const dg_raw_ptr<U>& ptr) noexcept: ptr_base(dg_static_raw_pointer_cast<T>(ptr)){}
                        
             template <class U, std::enable_if_t<is_strict_ptr_constructible_fr_v<T, U>, bool> = true>
-            constexpr dg_unique_ptr(dg_unique_ptr<U, DefaultDeleter>&& other) noexcept: ptr_base(dg_static_raw_pointer_cast<T>(other.raw())){
+            explicit constexpr dg_unique_ptr(dg_unique_ptr<U, DefaultDeleter>&& other) noexcept: ptr_base(dg_static_raw_pointer_cast<T>(other.raw())){
 
                 other.release();
             }
@@ -1099,7 +1101,7 @@ namespace dg::pointer{
             constexpr dg_shared_ptr(std::nullptr_t) noexcept: dg_shared_ptr(){}
 
             template <class U, class ...Args, std::enable_if_t<is_ptr_constructible_fr_v<T, U>, bool> = true>
-            dg_shared_ptr(dg_unique_ptr<U, Args...>&& obj) noexcept(noexcept(dg_shared_ptr(obj.raw(), std::move(obj).get_deleter()))): dg_shared_ptr(obj.raw(), std::move(obj).get_deleter()){
+            explicit dg_shared_ptr(dg_unique_ptr<U, Args...>&& obj) noexcept(noexcept(dg_shared_ptr(obj.raw(), std::move(obj).get_deleter()))): dg_shared_ptr(obj.raw(), std::move(obj).get_deleter()){
 
                 obj.release();
             }
@@ -1335,11 +1337,7 @@ namespace dg::pointer{
     template <class T, class ...Args, std::enable_if_t<std::is_array_v<T>, bool> = true>
     inline auto dg_make_shared(Args&& ...args){
 
-        auto obj = dg_make_unique<T>(std::forward<Args>(args)...);
-        auto rs  = dg_shared_ptr<T>(obj.raw());
-        obj.release();
-
-        return rs;
+        return dg_shared_ptr<T>(dg_make_unique<T>(std::forward<Args>(args)...));
     }
 
     template <class T>
